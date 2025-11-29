@@ -174,10 +174,24 @@ function getCurrentProviderUrl() {
 }
 
 async function toggleSidebarWindow() {
-  // Always use integrated side panel if available
+  // Try to use embedded sidebar in content script first
+  const activeTab = await getActiveTab();
+  if (activeTab && activeTab.id) {
+    try {
+      const response = await chromeAsync.tabsSendMessage(activeTab.id, { type: "TOGGLE_SIDEBAR" });
+      if (response && response.ok) {
+        debugLog('Embedded sidebar toggled');
+        return;
+      }
+    } catch (error) {
+      debugLog('Content script not available, trying side panel:', error);
+    }
+  }
+
+  // Fallback: try browser side panel if available
   if (await tryOpenSidePanel()) return;
 
-  // Fallback: only use popup window if side panel is not available
+  // Last resort: use popup window if side panel is not available
   if (sidebarWindowId) {
     await closeSidebarWindow();
   } else {
@@ -310,9 +324,24 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   
   if (msg.type === 'OPEN_SIDEBAR_POPUP') {
     debugLog('OPEN_SIDEBAR_POPUP requested', msg.source || 'unknown');
-    openSidebarWindow()
-      .then(() => sendResponse({ ok: true }))
-      .catch((err) => { debugLog('openSidebarWindow failed', err); sendResponse({ ok: false, error: String(err) }); });
+    // Try embedded sidebar first
+    getActiveTab().then(async (tab) => {
+      if (tab && tab.id) {
+        try {
+          const response = await chromeAsync.tabsSendMessage(tab.id, { type: "OPEN_SIDEBAR" });
+          if (response && response.ok) {
+            sendResponse({ ok: true });
+            return;
+          }
+        } catch (error) {
+          debugLog('Content script not available, using popup window:', error);
+        }
+      }
+      // Fallback to popup window
+      openSidebarWindow()
+        .then(() => sendResponse({ ok: true }))
+        .catch((err) => { debugLog('openSidebarWindow failed', err); sendResponse({ ok: false, error: String(err) }); });
+    });
     return true;
   }
   

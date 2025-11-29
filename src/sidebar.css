@@ -397,6 +397,56 @@ body {
   opacity: 1;
 }
 
+/* Embedded Sidebar */
+.ai-sidebar-embedded {
+  position: fixed;
+  top: 0;
+  right: 0;
+  width: 460px;
+  max-width: 90vw;
+  height: 100vh;
+  z-index: 2147483647;
+  background: #0d1117;
+  box-shadow: -4px 0 24px rgba(0, 0, 0, 0.5);
+  transform: translateX(100%);
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.ai-sidebar-embedded[data-visible="true"] {
+  transform: translateX(0);
+}
+
+/* Backdrop overlay */
+.ai-sidebar-backdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 2147483646;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s ease;
+}
+
+.ai-sidebar-backdrop[data-visible="true"] {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* Adjust app-container for embedded context */
+.ai-sidebar-embedded .app-container {
+  height: 100%;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
 /* Selection menu (for content script) */
 .ai-sidebar-selectmenu {
   position: absolute;
