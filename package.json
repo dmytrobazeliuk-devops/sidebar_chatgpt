@@ -1,0 +1,16 @@
+{
+  "name": "sidebar_chatgpt",
+  "version": "1.0.0",
+  "description": "A lightweight extension that opens the official ChatGPT site in a slim popup and runs entirely via hotkeys or the right‑click menu. All answers come from chatgpt.com (or any URL you set), so no API keys are needed.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "sharp": "^0.34.5"
+  }
+}
