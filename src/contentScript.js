@@ -1,8 +1,6 @@
 (() => {
-  const TOAST_ID = "chatgpt-hotkey-toast";
-  // Legacy ID kept for compatibility (no longer used)
-  const COPY_INPUT_ID = "chatgpt-hotkey-copy";
-  const defaultSettings = { targetLanguage: "Ukrainian" };
+  const TOAST_ID = "ai-sidebar-toast";
+  const defaultSettings = { targetLanguage: "Ukrainian", provider: "chatgpt" };
   let settings = { ...defaultSettings };
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -10,7 +8,7 @@
       buildSelection(message.intent)
         .then(sendResponse)
         .catch((error) => {
-          console.error("Hotkey Sidebar selection error", error);
+          console.error("AI Sidebar selection error", error);
           sendResponse({ ok: false, errorMessage: "Failed to process text." });
         });
       return true;
@@ -23,7 +21,7 @@
     return false;
   });
 
-  // Load settings (e.g., preferred translate language)
+  // Load settings
   try {
     chrome.storage?.sync?.get(defaultSettings, (stored) => {
       settings = { ...defaultSettings, ...(stored || {}) };
@@ -31,11 +29,11 @@
   } catch (_) {}
 
   // Selection hint menu
-  const SELECT_MENU_ID = "chatgpt-hotkey-selectmenu";
+  const SELECT_MENU_ID = "ai-sidebar-selectmenu";
   const QUICK_ACTIONS = [
-    { id: "ask", intent: "ask", label: "Ask", variant: "primary" },
+    { id: "ask", intent: "ask", label: "Ask AI", variant: "primary" },
     { id: "explain", intent: "explain", label: "Explain" },
-    { id: "improve", intent: "improve", label: "Improve writing" },
+    { id: "improve", intent: "improve", label: "Improve" },
     { id: "translate", intent: "translate", label: "Translate" }
   ];
   const quickActionById = QUICK_ACTIONS.reduce((acc, action) => {
@@ -52,33 +50,6 @@
   });
   document.addEventListener("scroll", hideSelectMenu, true);
   window.addEventListener("resize", hideSelectMenu);
-
-  // Alt+Shift+<digit> hotkeys handled in-page to bypass Chrome's command limit
-  document.addEventListener(
-    "keydown",
-    async (e) => {
-      if (!e.altKey || !e.shiftKey || e.ctrlKey || e.metaKey) return;
-      const key = e.key;
-      const digit = key >= '0' && key <= '9' ? key : null;
-      if (!digit) return;
-
-      let intent = 'summarize';
-      if (digit === '2') intent = 'translate';
-
-      const res = await buildSelection(intent);
-      if (!res?.ok || !res.prompt) {
-        if (res?.errorMessage) showToast(res.errorMessage);
-        return;
-      }
-      try {
-        await chrome.runtime.sendMessage({ type: 'ENQUEUE_PROMPT', prompt: res.prompt });
-        showToast('Sending to ChatGPT…');
-      } catch (_) {
-        showToast("Couldn't send to ChatGPT");
-      }
-    },
-    true
-  );
 
   function maybeShowSelectMenu() {
     const sel = window.getSelection();
@@ -110,9 +81,9 @@
     if (selectMenu) return;
     selectMenu = document.createElement("div");
     selectMenu.id = SELECT_MENU_ID;
-    selectMenu.className = "chatgpt-hotkey-selectmenu";
+    selectMenu.className = "ai-sidebar-selectmenu";
     selectMenu.innerHTML = `
-      <div class="chatgpt-hotkey-selectmenu__actions">
+      <div class="ai-sidebar-selectmenu__actions">
         ${QUICK_ACTIONS.map(
           (action) => `<button data-action="${action.id}" data-variant="${action.variant || "default"}">${action.label}</button>`
         ).join("")}
@@ -126,7 +97,7 @@
   function positionSelectMenu(rect) {
     const margin = 12;
     const top = window.scrollY + rect.top - 40 - margin;
-    let left = window.scrollX + rect.left + rect.width / 2 - 80; // center approx.
+    let left = window.scrollX + rect.left + rect.width / 2 - 80;
     const maxLeft = window.scrollX + document.documentElement.clientWidth - 160 - 8;
     left = Math.max(window.scrollX + 8, Math.min(left, maxLeft));
     selectMenu.style.top = `${Math.max(top, window.scrollY + 8)}px`;
@@ -157,13 +128,12 @@
     const actionConfig = action ? quickActionById[action] : null;
     if (!actionConfig) return;
 
-    const prompt = buildPrompt(actionConfig.intent, selText);
-
+    // Open sidebar
     try {
-      await chrome.runtime.sendMessage({ type: "ENQUEUE_PROMPT", prompt });
-      showToast("Sending to ChatGPT…");
+      await chrome.runtime.sendMessage({ type: "OPEN_SIDEBAR_POPUP" });
+      showToast("Opening AI sidebar…");
     } catch (_) {
-      showToast("Couldn't send to ChatGPT");
+      showToast("Couldn't open sidebar");
     }
   }
 
@@ -196,8 +166,6 @@
     }
   }
 
-  // Removed clipboard copy: background now sends directly into ChatGPT
-
   function showToast(text) {
     if (!text) {
       return;
@@ -206,7 +174,7 @@
     if (!toast) {
       toast = document.createElement("div");
       toast.id = TOAST_ID;
-      toast.className = "chatgpt-hotkey-toast";
+      toast.className = "ai-sidebar-toast";
       hostElement().appendChild(toast);
     }
     toast.textContent = text;
