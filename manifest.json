@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Hotkey Sidebar for ChatGPT",
-  "description": "Toggle a ChatGPT-powered sidebar (official site) and run actions using only keyboard shortcuts.",
-  "version": "0.1.0",
+  "name": "AI Sidebar - Multi Provider",
+  "description": "Toggle an AI-powered sidebar with ChatGPT, GitHub Copilot, Gemini, or Claude AI",
+  "version": "0.2.0",
   "icons": {
     "16": "assets/icon-16.png",
     "32": "assets/icon-32.png",
@@ -10,7 +10,7 @@
     "128": "assets/icon-128.png"
   },
   "action": {
-    "default_title": "Hotkey Sidebar for ChatGPT",
+    "default_title": "AI Sidebar",
     "default_icon": {
       "16": "assets/icon-16.png",
       "32": "assets/icon-32.png",
@@ -23,11 +23,16 @@
     "tabs",
     "clipboardWrite",
     "contextMenus",
-    "scripting"
+    "scripting",
+    "sidePanel"
   ],
   "host_permissions": [
     "https://chatgpt.com/*",
-    "https://chat.openai.com/*"
+    "https://chat.openai.com/*",
+    "https://github.com/copilot*",
+    "https://github.com/copilot/*",
+    "https://gemini.google.com/*",
+    "https://claude.ai/*"
   ],
   "background": {
     "service_worker": "src/background.js"
@@ -48,14 +53,6 @@
       "js": ["src/contentScript.js"],
       "css": ["src/sidebar.css"],
       "run_at": "document_idle"
-    },
-    {
-      "matches": [
-        "https://chatgpt.com/*",
-        "https://chat.openai.com/*"
-      ],
-      "js": ["src/chatInjector.js"],
-      "run_at": "document_idle"
     }
   ],
   "commands": {
@@ -64,14 +61,7 @@
         "default": "Ctrl+Shift+Y",
         "mac": "Command+Shift+Y"
       },
-      "description": "Show or hide the ChatGPT sidebar"
-    },
-    "summarize-selection": {
-      "suggested_key": {
-        "default": "Alt+Shift+1",
-        "mac": "Alt+Shift+1"
-      },
-      "description": "Summarize the current text selection"
+      "description": "Show or hide the AI sidebar"
     }
   }
 }

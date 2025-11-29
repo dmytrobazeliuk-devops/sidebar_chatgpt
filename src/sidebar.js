@@ -1,285 +1,229 @@
 (function() {
   'use strict';
 
-  const chatInput = document.getElementById('chatInput');
-  const sendButton = document.getElementById('sendButton');
-  const chatMessages = document.getElementById('chatMessages');
-  const welcomeMessage = document.getElementById('welcomeMessage');
-  const chatContainer = document.getElementById('chatContainer');
-  const chatgptFrame = document.getElementById('chatgptFrame');
+  const AI_PROVIDERS = {
+    chatgpt: {
+      name: "ChatGPT",
+      url: "https://chatgpt.com/"
+    },
+    copilot: {
+      name: "GitHub Copilot",
+      url: "https://github.com/copilot"
+    },
+    gemini: {
+      name: "Gemini",
+      url: "https://gemini.google.com/"
+    },
+    claude: {
+      name: "Claude AI",
+      url: "https://claude.ai/"
+    }
+  };
+
+  const aiFrame = document.getElementById('aiFrame');
   const refreshButton = document.getElementById('refreshButton');
+  const settingsButton = document.getElementById('settingsButton');
+  const openExternalButton = document.getElementById('openExternalButton');
+  const headerTitle = document.getElementById('headerTitle');
+  const titleText = document.getElementById('titleText');
+  const providerDropdown = document.getElementById('providerDropdown');
+  const loadingContainer = document.getElementById('loadingContainer');
+  const mainContainer = document.getElementById('mainContainer');
   const menuButton = document.getElementById('menuButton');
-  const newChatButton = document.getElementById('newChatButton');
 
-  let chatgptTabId = null;
-  let isProcessing = false;
-  let messageQueue = [];
+  let currentProvider = 'chatgpt';
+  let currentUrl = AI_PROVIDERS.chatgpt.url;
+  let dropdownOpen = false;
 
-  // Initialize ChatGPT - ask background to set up
-  async function initChatGPT() {
+  // Initialize
+  async function init() {
+    await loadConfig();
+    setupEventListeners();
+    loadAIProvider();
+  }
+
+  async function loadConfig() {
     try {
-      // Ask background script to ensure ChatGPT tab is ready
-      const response = await chrome.runtime.sendMessage({
-        type: 'ENSURE_CHATGPT_TAB'
+      const stored = await chrome.storage.sync.get({
+        provider: 'chatgpt',
+        customUrl: '',
+        chatUrl: ''
       });
+
+      currentProvider = stored.provider || 'chatgpt';
       
-      if (response && response.tabId) {
-        chatgptTabId = response.tabId;
+      if (stored.customUrl) {
+        currentUrl = stored.customUrl;
+      } else if (stored.chatUrl && stored.chatUrl !== AI_PROVIDERS[currentProvider]?.url) {
+        currentUrl = stored.chatUrl;
+      } else {
+        currentUrl = AI_PROVIDERS[currentProvider]?.url || AI_PROVIDERS.chatgpt.url;
       }
+
+      updateTitle();
     } catch (error) {
-      console.error('Failed to initialize ChatGPT:', error);
-      // Don't show error immediately, let background handle it
+      console.error('Failed to load config:', error);
     }
   }
 
-  // If this sidebar runs inside the browser side panel, ensure the background can open popup when needed
-  (function setupAutoFallback() {
-    try {
-      console.debug('[HotkeySidebar] sidebar script loaded');
-      // Listen for a quick ping from background to ensure connectivity
-      chrome.runtime.sendMessage({ type: 'SIDEBAR_PING' }).catch(() => {});
-    } catch (_) {}
-  })();
-
-  // Auto-resize textarea
-  chatInput.addEventListener('input', function() {
-    this.style.height = 'auto';
-    this.style.height = Math.min(this.scrollHeight, 200) + 'px';
-    sendButton.disabled = !this.value.trim() || isProcessing;
-  });
-
-  chatInput.addEventListener('keydown', function(e) {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      if (!isProcessing && this.value.trim()) {
-        sendMessage();
-      }
-    }
-  });
-
-  sendButton.addEventListener('click', sendMessage);
-
-  refreshButton.addEventListener('click', async () => {
-    try {
-      await chrome.runtime.sendMessage({ type: 'REFRESH_CHATGPT_TAB' });
-      showToast('Chat refreshed');
-      await initChatGPT();
-    } catch (error) {
-      console.error('Failed to refresh:', error);
-    }
-  });
-
-  newChatButton.addEventListener('click', () => {
-    startNewChat();
-  });
-
-  // Listen for messages from background script
-  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if (message.type === 'CHATGPT_RESPONSE') {
-      addMessage('assistant', message.text);
-      isProcessing = false;
-      sendButton.disabled = !chatInput.value.trim();
-      sendResponse({ ok: true });
-      return true;
-    }
-    if (message.type === 'CHATGPT_ERROR') {
-      showError(message.error || 'Failed to get response');
-      isProcessing = false;
-      sendButton.disabled = !chatInput.value.trim();
-      sendResponse({ ok: true });
-      return true;
-    }
-    return false;
-  });
-
-  async function sendMessage() {
-    const text = chatInput.value.trim();
-    if (!text || isProcessing) return;
-
-    // Add user message to UI
-    addMessage('user', text);
-    chatInput.value = '';
-    chatInput.style.height = 'auto';
-    sendButton.disabled = true;
-    isProcessing = true;
-
-    // Hide welcome message, show chat
-    if (welcomeMessage.style.display !== 'none') {
-      welcomeMessage.style.display = 'none';
-      chatMessages.style.display = 'flex';
-    }
-
-    // Show typing indicator
-    showTypingIndicator();
-
-    try {
-      // Initialize ChatGPT if needed
-      if (!chatgptTabId) {
-        await initChatGPT();
-      }
-
-      // Send message to ChatGPT via background script
-      const response = await chrome.runtime.sendMessage({
-        type: 'SEND_TO_CHATGPT',
-        prompt: text,
-        tabId: chatgptTabId
-      });
-
-      if (!response || !response.ok) {
-        throw new Error(response?.error || 'Failed to send message');
-      }
-
-      // If response came directly, use it
-      if (response.response) {
-        addMessage('assistant', response.response);
-        isProcessing = false;
-        sendButton.disabled = !chatInput.value.trim();
-      }
-      // Otherwise wait for CHATGPT_RESPONSE message
-    } catch (error) {
-      console.error('Error sending message:', error);
-      hideTypingIndicator();
-      showError('Failed to send message. Please try again.');
-      isProcessing = false;
-      sendButton.disabled = !chatInput.value.trim();
-    }
-  }
-
-  function addMessage(role, text) {
-    hideTypingIndicator();
-    
-    const messageDiv = document.createElement('div');
-    messageDiv.className = `message message-${role}`;
-    
-    const contentDiv = document.createElement('div');
-    contentDiv.className = 'message-content';
-    contentDiv.textContent = text;
-    
-    const timeDiv = document.createElement('div');
-    timeDiv.className = 'message-time';
-    timeDiv.textContent = new Date().toLocaleTimeString('uk-UA', { 
-      hour: '2-digit', 
-      minute: '2-digit' 
+  function setupEventListeners() {
+    // Refresh button
+    refreshButton.addEventListener('click', () => {
+      showLoading();
+      aiFrame.src = currentUrl;
     });
-    
-    messageDiv.appendChild(contentDiv);
-    messageDiv.appendChild(timeDiv);
-    
-    chatMessages.appendChild(messageDiv);
-    
-    // Scroll to bottom
-    chatContainer.scrollTop = chatContainer.scrollHeight;
+
+    // Settings button
+    settingsButton.addEventListener('click', () => {
+      chrome.runtime.openOptionsPage();
+    });
+
+    // Open in external tab
+    openExternalButton.addEventListener('click', () => {
+      chrome.tabs.create({ url: currentUrl });
+    });
+
+    // Header title click - toggle dropdown
+    headerTitle.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleDropdown();
+    });
+
+    // Menu button - also toggles dropdown
+    menuButton.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleDropdown();
+    });
+
+    // Dropdown items
+    document.querySelectorAll('.dropdown-item').forEach(item => {
+      item.addEventListener('click', async (e) => {
+        const provider = e.currentTarget.dataset.provider;
+        if (provider && AI_PROVIDERS[provider]) {
+          await switchProvider(provider);
+        }
+        closeDropdown();
+      });
+    });
+
+    // Close dropdown on outside click
+    document.addEventListener('click', () => {
+      closeDropdown();
+    });
+
+    // Iframe load events
+    aiFrame.addEventListener('load', () => {
+      hideLoading();
+    });
+
+    aiFrame.addEventListener('error', () => {
+      hideLoading();
+      showError();
+    });
+
+    // Listen for storage changes
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area === 'sync') {
+        if (changes.provider || changes.customUrl || changes.chatUrl) {
+          loadConfig().then(() => {
+            loadAIProvider();
+          });
+        }
+      }
+    });
   }
 
-  function showTypingIndicator() {
-    const typingDiv = document.createElement('div');
-    typingDiv.className = 'message message-assistant';
-    typingDiv.id = 'typingIndicator';
-    
-    const indicatorDiv = document.createElement('div');
-    indicatorDiv.className = 'typing-indicator';
-    indicatorDiv.innerHTML = `
-      <div class="typing-dot"></div>
-      <div class="typing-dot"></div>
-      <div class="typing-dot"></div>
-    `;
-    
-    typingDiv.appendChild(indicatorDiv);
-    chatMessages.appendChild(typingDiv);
-    chatContainer.scrollTop = chatContainer.scrollHeight;
+  function toggleDropdown() {
+    dropdownOpen = !dropdownOpen;
+    providerDropdown.classList.toggle('open', dropdownOpen);
+    headerTitle.classList.toggle('active', dropdownOpen);
   }
 
-  function hideTypingIndicator() {
-    const indicator = document.getElementById('typingIndicator');
-    if (indicator) {
-      indicator.remove();
+  function closeDropdown() {
+    dropdownOpen = false;
+    providerDropdown.classList.remove('open');
+    headerTitle.classList.remove('active');
+  }
+
+  async function switchProvider(provider) {
+    currentProvider = provider;
+    currentUrl = AI_PROVIDERS[provider].url;
+    
+    // Save to storage
+    await chrome.storage.sync.set({
+      provider: provider,
+      chatUrl: currentUrl
+    });
+
+    updateTitle();
+    loadAIProvider();
+  }
+
+  function updateTitle() {
+    const providerInfo = AI_PROVIDERS[currentProvider];
+    titleText.textContent = providerInfo ? providerInfo.name : 'AI Chat';
+    
+    // Update dropdown active state
+    document.querySelectorAll('.dropdown-item').forEach(item => {
+      item.classList.toggle('active', item.dataset.provider === currentProvider);
+    });
+  }
+
+  function loadAIProvider() {
+    showLoading();
+    
+    // Set iframe src
+    if (aiFrame.src !== currentUrl) {
+      aiFrame.src = currentUrl;
+    } else {
+      hideLoading();
     }
   }
 
-  function showError(message) {
-    hideTypingIndicator();
-    addMessage('assistant', `Error: ${message}`);
+  function showLoading() {
+    loadingContainer.style.display = 'flex';
+    mainContainer.style.opacity = '0.5';
   }
 
-  function showToast(message) {
-    // Simple toast notification
-    const toast = document.createElement('div');
-    toast.style.cssText = `
-      position: fixed;
-      bottom: 80px;
-      left: 50%;
-      transform: translateX(-50%);
-      background: rgba(0, 0, 0, 0.8);
-      color: white;
-      padding: 12px 20px;
-      border-radius: 8px;
-      font-size: 14px;
-      z-index: 10000;
-      animation: fadeInOut 2s;
+  function hideLoading() {
+    loadingContainer.style.display = 'none';
+    mainContainer.style.opacity = '1';
+  }
+
+  function showError() {
+    // If iframe fails to load (likely due to X-Frame-Options),
+    // show a message with option to open in new tab
+    loadingContainer.innerHTML = `
+      <div class="error-state">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10"/>
+          <path d="M12 8v4M12 16h.01"/>
+        </svg>
+        <h3>Не вдалося завантажити</h3>
+        <p>Цей сайт не дозволяє вбудовування.<br>Відкрийте його у новій вкладці.</p>
+        <button class="open-tab-button" id="openTabButton">
+          <svg width="16" height="16" viewBox="0 0 18 18" fill="none">
+            <path d="M14 10V14C14 14.5304 13.7893 15.0391 13.4142 15.4142C13.0391 15.7893 12.5304 16 12 16H4C3.46957 16 2.96086 15.7893 2.58579 15.4142C2.21071 15.0391 2 14.5304 2 14V6C2 5.46957 2.21071 4.96086 2.58579 4.58579C2.96086 4.21071 3.46957 4 4 4H8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M11 2H16V7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M7 11L16 2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          Відкрити у вкладці
+        </button>
+      </div>
     `;
-    toast.textContent = message;
-    document.body.appendChild(toast);
-    
-    setTimeout(() => {
-      toast.style.animation = 'fadeOut 0.3s';
-      setTimeout(() => toast.remove(), 300);
-    }, 1700);
+    loadingContainer.style.display = 'flex';
+    mainContainer.style.display = 'none';
+
+    document.getElementById('openTabButton')?.addEventListener('click', () => {
+      chrome.tabs.create({ url: currentUrl });
+    });
   }
 
-  function startNewChat() {
-    // Clear messages
-    chatMessages.innerHTML = '';
-    chatMessages.style.display = 'none';
-    
-    // Show welcome message
-    welcomeMessage.style.display = 'flex';
-    
-    // Clear input
-    chatInput.value = '';
-    chatInput.style.height = 'auto';
-    sendButton.disabled = true;
-    
-    // Reset processing state
-    isProcessing = false;
-    messageQueue = [];
-    
-    // Optionally start a new chat in ChatGPT
-    if (chatgptTabId) {
-      chrome.runtime.sendMessage({
-        type: 'NEW_CHATGPT_CHAT',
-        tabId: chatgptTabId
-      }).catch(() => {});
-    }
-  }
+  // Notify background that sidebar is ready
+  try {
+    chrome.runtime.sendMessage({ type: 'SIDEBAR_PING' }).catch(() => {});
+  } catch (_) {}
 
   // Initialize on load
-  initChatGPT().catch(console.error);
-
-  // Handle messages from content script (for queued prompts)
-  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if (message.type === 'ENQUEUE_PROMPT') {
-      if (chatInput && !isProcessing) {
-        chatInput.value = message.prompt;
-        chatInput.dispatchEvent(new Event('input'));
-        setTimeout(() => sendMessage(), 100);
-      } else {
-        messageQueue.push(message.prompt);
-      }
-      sendResponse({ ok: true });
-      return true;
-    }
-    return false;
-  });
-
-  // Process queued messages when ready
-  setInterval(() => {
-    if (!isProcessing && messageQueue.length > 0) {
-      const prompt = messageQueue.shift();
-      if (chatInput) {
-        chatInput.value = prompt;
-        chatInput.dispatchEvent(new Event('input'));
-        setTimeout(() => sendMessage(), 100);
-      }
-    }
-  }, 500);
+  init().catch(console.error);
 })();
