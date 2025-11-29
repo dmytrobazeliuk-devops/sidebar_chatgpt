@@ -1,7 +1,10 @@
 (() => {
   const TOAST_ID = "ai-sidebar-toast";
+  const SIDEBAR_ID = "ai-sidebar-embedded";
   const defaultSettings = { targetLanguage: "Ukrainian", provider: "chatgpt" };
   let settings = { ...defaultSettings };
+  let sidebarVisible = false;
+  let sidebarContainer = null;
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message.type === "PREPARE_SELECTION") {
@@ -16,6 +19,24 @@
 
     if (message.type === "SHOW_TOAST") {
       showToast(message.text || "Done");
+    }
+
+    if (message.type === "TOGGLE_SIDEBAR") {
+      toggleSidebar();
+      sendResponse({ ok: true });
+      return true;
+    }
+
+    if (message.type === "OPEN_SIDEBAR") {
+      showSidebar();
+      sendResponse({ ok: true });
+      return true;
+    }
+
+    if (message.type === "CLOSE_SIDEBAR") {
+      hideSidebar();
+      sendResponse({ ok: true });
+      return true;
     }
 
     return false;
@@ -130,7 +151,7 @@
 
     // Open sidebar
     try {
-      await chrome.runtime.sendMessage({ type: "OPEN_SIDEBAR_POPUP" });
+      showSidebar();
       showToast("Opening AI sidebar…");
     } catch (_) {
       showToast("Couldn't open sidebar");
@@ -188,4 +209,399 @@
   function hostElement() {
     return document.body || document.documentElement;
   }
+
+  // Embedded sidebar functions
+  function ensureSidebar() {
+    if (sidebarContainer) return sidebarContainer;
+    
+    // Create backdrop overlay
+    const backdrop = document.createElement("div");
+    backdrop.className = "ai-sidebar-backdrop";
+    backdrop.setAttribute("data-visible", "false");
+    backdrop.addEventListener("click", () => {
+      hideSidebar();
+    });
+    hostElement().appendChild(backdrop);
+    
+    sidebarContainer = document.createElement("div");
+    sidebarContainer.id = SIDEBAR_ID;
+    sidebarContainer.className = "ai-sidebar-embedded";
+    sidebarContainer.setAttribute("data-visible", "false");
+    
+    // Load sidebar HTML content
+    const sidebarHTML = `
+      <div class="app-container">
+        <!-- Header -->
+        <header class="app-header">
+          <div class="header-left">
+            <button class="menu-button" id="menuButton" aria-label="Menu">
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M2 5H18M2 10H18M2 15H18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+              </svg>
+            </button>
+            <div class="header-title" id="headerTitle">
+              <span class="title-text" id="titleText">AI Chat</span>
+              <svg class="chevron-icon" width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M4 6L8 10L12 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </div>
+          </div>
+          <div class="header-actions">
+            <button class="icon-button" id="closeButton" aria-label="Close sidebar" title="Close">
+              <svg width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M13.5 4.5L4.5 13.5M4.5 4.5L13.5 13.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </button>
+            <button class="icon-button" id="openExternalButton" aria-label="Open in new tab" title="Open in new tab">
+              <svg width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M14 10V14C14 14.5304 13.7893 15.0391 13.4142 15.4142C13.0391 15.7893 12.5304 16 12 16H4C3.46957 16 2.96086 15.7893 2.58579 15.4142C2.21071 15.0391 2 14.5304 2 14V6C2 5.46957 2.21071 4.96086 2.58579 4.58579C2.96086 4.21071 3.46957 4 4 4H8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M11 2H16V7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M7 11L16 2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </button>
+            <button class="icon-button" id="refreshButton" aria-label="Refresh" title="Refresh">
+              <svg width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M1 9C1 13.4183 4.58172 17 9 17C13.4183 17 17 13.4183 17 9C17 4.58172 13.4183 1 9 1M9 1V5M9 1H5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </button>
+            <button class="icon-button" id="settingsButton" aria-label="Settings" title="Settings">
+              <svg width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M9 11.25C10.2426 11.25 11.25 10.2426 11.25 9C11.25 7.75736 10.2426 6.75 9 6.75C7.75736 6.75 6.75 7.75736 6.75 9C6.75 10.2426 7.75736 11.25 9 11.25Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M14.55 11.25C14.4374 11.5025 14.4042 11.7845 14.4548 12.0576C14.5053 12.3307 14.637 12.5819 14.8313 12.78L14.8763 12.825C15.0329 12.9814 15.1567 13.1674 15.2409 13.3721C15.3251 13.5768 15.3682 13.7963 15.3682 14.0181C15.3682 14.24 15.3251 14.4594 15.2409 14.6641C15.1567 14.8688 15.0329 15.0549 14.8763 15.2113C14.7199 15.3678 14.5338 15.4917 14.3291 15.5759C14.1244 15.6601 13.905 15.7031 13.6831 15.7031C13.4613 15.7031 13.2418 15.6601 13.0371 15.5759C12.8324 15.4917 12.6464 15.3678 12.49 15.2113L12.445 15.1663C12.2469 14.972 11.9957 14.8403 11.7226 14.7898C11.4495 14.7392 11.1675 14.7724 10.915 14.885C10.6676 14.9925 10.4567 15.1692 10.3078 15.3938C10.1589 15.6183 10.0784 15.8811 10.075 16.15V16.3125C10.075 16.7601 9.89717 17.1893 9.58086 17.5056C9.26455 17.8219 8.83532 18 8.3875 18C7.93968 18 7.51045 17.8219 7.19414 17.5056C6.87783 17.1893 6.7 16.7601 6.7 16.3125V16.225C6.69132 15.9479 6.60139 15.6799 6.44113 15.4542C6.28087 15.2285 6.0578 15.0549 5.8 14.955C5.54749 14.8424 5.26549 14.8092 4.99239 14.8598C4.71929 14.9103 4.46812 15.042 4.27 15.2363L4.225 15.2813C4.06864 15.4378 3.88256 15.5617 3.67786 15.6459C3.47316 15.7301 3.25372 15.7731 3.03188 15.7731C2.81003 15.7731 2.59059 15.7301 2.38589 15.6459C2.18119 15.5617 1.99511 15.4378 1.83875 15.2813C1.68219 15.1249 1.55834 14.9388 1.47414 14.7341C1.38994 14.5294 1.34688 14.31 1.34688 14.0881C1.34688 13.8663 1.38994 13.6468 1.47414 13.4421C1.55834 13.2374 1.68219 13.0514 1.83875 12.895L1.88375 12.85C2.07802 12.6519 2.20973 12.4007 2.26025 12.1276C2.31077 11.8545 2.27757 11.5725 2.165 11.32C2.05753 11.0726 1.88083 10.8617 1.65626 10.7128C1.4317 10.5639 1.1689 10.4834 0.9 10.48H0.6875C0.239918 10.48 -0.189312 10.3022 -0.505623 9.98586C-0.821934 9.66955 -1 9.24032 -1 8.7925C-1 8.34468 -0.821934 7.91545 -0.505623 7.59914C-0.189312 7.28283 0.239918 7.105 0.6875 7.105H0.775C1.05206 7.09632 1.32014 7.00639 1.54582 6.84613C1.77151 6.68587 1.94506 6.4628 2.045 6.205C2.15757 5.95249 2.19077 5.67049 2.14025 5.39739C2.08973 5.12429 1.95802 4.87312 1.76375 4.675L1.71875 4.63C1.56219 4.47364 1.43834 4.28756 1.35414 4.08286C1.26994 3.87816 1.22688 3.65872 1.22688 3.43688C1.22688 3.21503 1.26994 2.99559 1.35414 2.79089C1.43834 2.58619 1.56219 2.40011 1.71875 2.24375C1.87511 2.08719 2.06119 1.96334 2.26589 1.87914C2.47059 1.79494 2.69003 1.75188 2.91188 1.75188C3.13372 1.75188 3.35316 1.79494 3.55786 1.87914C3.76256 1.96334 3.94864 2.08719 4.105 2.24375L4.15 2.28875C4.34812 2.48302 4.59929 2.61473 4.87239 2.66525C5.14549 2.71577 5.42749 2.68257 5.68 2.57V2.5C5.92738 2.39253 6.1383 2.21583 6.28721 1.99126C6.43612 1.7667 6.51664 1.5039 6.52 1.235V0.6875C6.52 0.239918 6.69807 -0.189312 7.01438 -0.505623C7.33069 -0.821934 7.75992 -1 8.2075 -1C8.65532 -1 9.08455 -0.821934 9.40086 -0.505623C9.71717 -0.189312 9.895 0.239918 9.895 0.6875V0.775C9.89836 1.0439 9.97888 1.3067 10.1278 1.53126C10.2767 1.75583 10.4876 1.93253 10.735 2.04V2.11C10.9875 2.22257 11.2695 2.25577 11.5426 2.20525C11.8157 2.15473 12.0669 2.02302 12.265 1.82875L12.31 1.78375C12.4664 1.62719 12.6524 1.50334 12.8571 1.41914C13.0618 1.33494 13.2813 1.29188 13.5031 1.29188C13.725 1.29188 13.9444 1.33494 14.1491 1.41914C14.3538 1.50334 14.5399 1.62719 14.6963 1.78375C14.8528 1.94011 14.9767 2.12619 15.0609 2.33089C15.1451 2.53559 15.1881 2.75503 15.1881 2.97688C15.1881 3.19872 15.1451 3.41816 15.0609 3.62286C14.9767 3.82756 14.8528 4.01364 14.6963 4.17L14.6513 4.215C14.457 4.41312 14.3253 4.66429 14.2748 4.93739C14.2242 5.21049 14.2574 5.49249 14.37 5.745H14.44C14.6874 5.85247 14.8983 6.02917 15.0472 6.25374C15.1961 6.4783 15.2766 6.7411 15.28 7.01V7.105C15.28 7.55282 15.4581 7.98205 15.7744 8.29836C16.0907 8.61467 16.5199 8.7925 16.9677 8.7925H17.0625C17.5101 8.7925 17.9393 8.97057 18.2556 9.28688C18.5719 9.60319 18.75 10.0324 18.75 10.4802C18.75 10.9281 18.5719 11.3573 18.2556 11.6736C17.9393 11.9899 17.5101 12.168 17.0625 12.168H16.975C16.7061 12.1714 16.4433 12.2519 16.2187 12.4008C15.9942 12.5497 15.8175 12.7606 15.71 13.008L14.55 11.25Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </button>
+          </div>
+        </header>
+
+        <!-- Provider Dropdown -->
+        <div class="provider-dropdown" id="providerDropdown">
+          <div class="dropdown-item" data-provider="chatgpt">
+            <div class="dropdown-icon chatgpt">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="white">
+                <path d="M22.282 9.821a5.985 5.985 0 0 0-.516-4.91 6.046 6.046 0 0 0-6.51-2.9A6.065 6.065 0 0 0 4.981 4.18a5.985 5.985 0 0 0-3.998 2.9 6.046 6.046 0 0 0 .743 7.097 5.98 5.98 0 0 0 .51 4.911 6.051 6.051 0 0 0 6.515 2.9A5.985 5.985 0 0 0 13.26 24a6.056 6.056 0 0 0 5.772-4.206 5.99 5.99 0 0 0 3.997-2.9 6.056 6.056 0 0 0-.747-7.073z"/>
+              </svg>
+            </div>
+            <span>ChatGPT</span>
+          </div>
+          <div class="dropdown-item" data-provider="copilot">
+            <div class="dropdown-icon copilot">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="white">
+                <path d="M12 2C6.477 2 2 6.477 2 12c0 4.42 2.865 8.166 6.839 9.489.5.092.682-.217.682-.482 0-.237-.009-.866-.013-1.7-2.782.603-3.369-1.342-3.369-1.342-.454-1.155-1.11-1.462-1.11-1.462-.908-.62.069-.608.069-.608 1.003.07 1.531 1.03 1.531 1.03.892 1.529 2.341 1.087 2.91.831.092-.646.35-1.086.636-1.336-2.22-.253-4.555-1.11-4.555-4.943 0-1.091.39-1.984 1.029-2.683-.103-.253-.446-1.27.098-2.647 0 0 .84-.269 2.75 1.025A9.578 9.578 0 0112 6.836c.85.004 1.705.114 2.504.336 1.909-1.294 2.747-1.025 2.747-1.025.546 1.377.203 2.394.1 2.647.64.699 1.028 1.592 1.028 2.683 0 3.842-2.339 4.687-4.566 4.935.359.309.678.919.678 1.852 0 1.336-.012 2.415-.012 2.743 0 .267.18.578.688.48C19.138 20.163 22 16.418 22 12c0-5.523-4.477-10-10-10z"/>
+              </svg>
+            </div>
+            <span>GitHub Copilot</span>
+          </div>
+          <div class="dropdown-item" data-provider="gemini">
+            <div class="dropdown-icon gemini">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="white">
+                <path d="M12 2L4 6v6c0 5.55 3.84 10.74 8 12 4.16-1.26 8-6.45 8-12V6l-8-4z"/>
+              </svg>
+            </div>
+            <span>Gemini</span>
+          </div>
+          <div class="dropdown-item" data-provider="claude">
+            <div class="dropdown-icon claude">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="white">
+                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z"/>
+              </svg>
+            </div>
+            <span>Claude AI</span>
+          </div>
+        </div>
+
+        <!-- Loading State -->
+        <div class="loading-container" id="loadingContainer">
+          <div class="loading-spinner"></div>
+          <p>Loading...</p>
+        </div>
+
+        <!-- Main Content Area - Iframe -->
+        <main class="app-main" id="mainContainer">
+          <iframe 
+            id="aiFrame" 
+            src="about:blank" 
+            class="ai-frame"
+            allow="clipboard-read; clipboard-write"
+            sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals"
+          ></iframe>
+        </main>
+      </div>
+    `;
+    
+    sidebarContainer.innerHTML = sidebarHTML;
+    hostElement().appendChild(sidebarContainer);
+    
+    // Initialize sidebar functionality
+    initializeEmbeddedSidebar();
+    
+    return sidebarContainer;
+  }
+
+  function initializeEmbeddedSidebar() {
+    if (!sidebarContainer) return;
+    
+    // Wait for DOM to be ready
+    setTimeout(() => {
+      const AI_PROVIDERS = {
+        chatgpt: { name: "ChatGPT", url: "https://chatgpt.com/" },
+        copilot: { name: "GitHub Copilot", url: "https://github.com/copilot" },
+        gemini: { name: "Gemini", url: "https://gemini.google.com/" },
+        claude: { name: "Claude AI", url: "https://claude.ai/" }
+      };
+
+      const aiFrame = sidebarContainer.querySelector('#aiFrame');
+      const refreshButton = sidebarContainer.querySelector('#refreshButton');
+      const settingsButton = sidebarContainer.querySelector('#settingsButton');
+      const openExternalButton = sidebarContainer.querySelector('#openExternalButton');
+      const headerTitle = sidebarContainer.querySelector('#headerTitle');
+      const titleText = sidebarContainer.querySelector('#titleText');
+      const providerDropdown = sidebarContainer.querySelector('#providerDropdown');
+      const loadingContainer = sidebarContainer.querySelector('#loadingContainer');
+      const mainContainer = sidebarContainer.querySelector('#mainContainer');
+      const menuButton = sidebarContainer.querySelector('#menuButton');
+      const closeButton = sidebarContainer.querySelector('#closeButton');
+
+      if (!aiFrame || !titleText) return;
+
+      let currentProvider = 'chatgpt';
+      let currentUrl = AI_PROVIDERS.chatgpt.url;
+      let dropdownOpen = false;
+
+      // Setup close button
+      if (closeButton) {
+        closeButton.addEventListener("click", () => {
+          hideSidebar();
+        });
+      }
+
+      // Load config
+      chrome.storage.sync.get({ provider: 'chatgpt', customUrl: '', chatUrl: '' }, (stored) => {
+        currentProvider = stored.provider || 'chatgpt';
+        if (stored.customUrl) {
+          currentUrl = stored.customUrl;
+        } else if (stored.chatUrl && stored.chatUrl !== AI_PROVIDERS[currentProvider]?.url) {
+          currentUrl = stored.chatUrl;
+        } else {
+          currentUrl = AI_PROVIDERS[currentProvider]?.url || AI_PROVIDERS.chatgpt.url;
+        }
+        updateTitle();
+        loadAIProvider();
+      });
+
+      function updateTitle() {
+        const providerInfo = AI_PROVIDERS[currentProvider];
+        if (titleText) {
+          titleText.textContent = providerInfo ? providerInfo.name : 'AI Chat';
+        }
+        if (providerDropdown) {
+          providerDropdown.querySelectorAll('.dropdown-item').forEach(item => {
+            item.classList.toggle('active', item.dataset.provider === currentProvider);
+          });
+        }
+      }
+
+      function loadAIProvider() {
+        showLoading();
+        if (aiFrame.src !== currentUrl) {
+          aiFrame.src = currentUrl;
+        } else {
+          hideLoading();
+        }
+      }
+
+      function showLoading() {
+        if (loadingContainer) loadingContainer.style.display = 'flex';
+        if (mainContainer) mainContainer.style.opacity = '0.5';
+      }
+
+      function hideLoading() {
+        if (loadingContainer) loadingContainer.style.display = 'none';
+        if (mainContainer) mainContainer.style.opacity = '1';
+      }
+
+      function toggleDropdown() {
+        dropdownOpen = !dropdownOpen;
+        if (providerDropdown) {
+          providerDropdown.classList.toggle('open', dropdownOpen);
+        }
+        if (headerTitle) {
+          headerTitle.classList.toggle('active', dropdownOpen);
+        }
+      }
+
+      function closeDropdown() {
+        dropdownOpen = false;
+        if (providerDropdown) providerDropdown.classList.remove('open');
+        if (headerTitle) headerTitle.classList.remove('active');
+      }
+
+      async function switchProvider(provider) {
+        currentProvider = provider;
+        currentUrl = AI_PROVIDERS[provider].url;
+        await chrome.storage.sync.set({ provider: provider, chatUrl: currentUrl });
+        updateTitle();
+        loadAIProvider();
+      }
+
+      // Event listeners
+      if (refreshButton) {
+        refreshButton.addEventListener('click', () => {
+          showLoading();
+          aiFrame.src = currentUrl;
+        });
+      }
+
+      if (settingsButton) {
+        settingsButton.addEventListener('click', () => {
+          chrome.runtime.openOptionsPage();
+        });
+      }
+
+      if (openExternalButton) {
+        openExternalButton.addEventListener('click', () => {
+          chrome.tabs.create({ url: currentUrl });
+        });
+      }
+
+      if (headerTitle) {
+        headerTitle.addEventListener('click', (e) => {
+          e.stopPropagation();
+          toggleDropdown();
+        });
+      }
+
+      if (menuButton) {
+        menuButton.addEventListener('click', (e) => {
+          e.stopPropagation();
+          toggleDropdown();
+        });
+      }
+
+      if (providerDropdown) {
+        providerDropdown.querySelectorAll('.dropdown-item').forEach(item => {
+          item.addEventListener('click', async (e) => {
+            const provider = e.currentTarget.dataset.provider;
+            if (provider && AI_PROVIDERS[provider]) {
+              await switchProvider(provider);
+            }
+            closeDropdown();
+          });
+        });
+      }
+
+      // Close dropdown when clicking outside
+      document.addEventListener('click', (e) => {
+        if (providerDropdown && !providerDropdown.contains(e.target) && 
+            headerTitle && !headerTitle.contains(e.target) &&
+            menuButton && !menuButton.contains(e.target)) {
+          closeDropdown();
+        }
+      });
+
+      if (aiFrame) {
+        aiFrame.addEventListener('load', () => {
+          hideLoading();
+        });
+        aiFrame.addEventListener('error', () => {
+          hideLoading();
+          showError();
+        });
+      }
+
+      function showError() {
+        if (!loadingContainer) return;
+        loadingContainer.innerHTML = `
+          <div class="error-state">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"/>
+              <path d="M12 8v4M12 16h.01"/>
+            </svg>
+            <h3>Failed to load</h3>
+            <p>This site does not allow embedding.<br>Open it in a new tab.</p>
+            <button class="open-tab-button" id="openTabButton">
+              <svg width="16" height="16" viewBox="0 0 18 18" fill="none">
+                <path d="M14 10V14C14 14.5304 13.7893 15.0391 13.4142 15.4142C13.0391 15.7893 12.5304 16 12 16H4C3.46957 16 2.96086 15.7893 2.58579 15.4142C2.21071 15.0391 2 14.5304 2 14V6C2 5.46957 2.21071 4.96086 2.58579 4.58579C2.96086 4.21071 3.46957 4 4 4H8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M11 2H16V7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M7 11L16 2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+              Open in tab
+            </button>
+          </div>
+        `;
+        loadingContainer.style.display = 'flex';
+        if (mainContainer) mainContainer.style.display = 'none';
+
+        const openTabButton = loadingContainer.querySelector('#openTabButton');
+        if (openTabButton) {
+          openTabButton.addEventListener('click', () => {
+            chrome.tabs.create({ url: currentUrl });
+          });
+        }
+      }
+
+      // Listen for storage changes
+      chrome.storage.onChanged.addListener((changes, area) => {
+        if (area === 'sync') {
+          if (changes.provider || changes.customUrl || changes.chatUrl) {
+            chrome.storage.sync.get({ provider: 'chatgpt', customUrl: '', chatUrl: '' }, (stored) => {
+              currentProvider = stored.provider || 'chatgpt';
+              if (stored.customUrl) {
+                currentUrl = stored.customUrl;
+              } else if (stored.chatUrl && stored.chatUrl !== AI_PROVIDERS[currentProvider]?.url) {
+                currentUrl = stored.chatUrl;
+              } else {
+                currentUrl = AI_PROVIDERS[currentProvider]?.url || AI_PROVIDERS.chatgpt.url;
+              }
+              updateTitle();
+              loadAIProvider();
+            });
+          }
+        }
+      });
+    }, 100);
+  }
+
+  function toggleSidebar() {
+    if (sidebarVisible) {
+      hideSidebar();
+    } else {
+      showSidebar();
+    }
+  }
+
+  function showSidebar() {
+    ensureSidebar();
+    if (sidebarContainer) {
+      sidebarContainer.setAttribute("data-visible", "true");
+      sidebarVisible = true;
+      // Show backdrop
+      const backdrop = document.querySelector(".ai-sidebar-backdrop");
+      if (backdrop) {
+        backdrop.setAttribute("data-visible", "true");
+      }
+      // Prevent body scroll when sidebar is open
+      document.body.style.overflow = "hidden";
+    }
+  }
+
+  function hideSidebar() {
+    if (sidebarContainer) {
+      sidebarContainer.setAttribute("data-visible", "false");
+      sidebarVisible = false;
+      // Hide backdrop
+      const backdrop = document.querySelector(".ai-sidebar-backdrop");
+      if (backdrop) {
+        backdrop.setAttribute("data-visible", "false");
+      }
+      // Restore body scroll
+      document.body.style.overflow = "";
+    }
+  }
+
+  // Close sidebar on Escape key
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && sidebarVisible) {
+      hideSidebar();
+    }
+  });
 })();
